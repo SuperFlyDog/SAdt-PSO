@@ -3,24 +3,20 @@ import random
 import matplotlib
 import time
 from statistics import mean, stdev
-import math
+
 matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 
 
 class BBExpPSO_model:
     def __init__(self, N, D, M):
-        # Calculate grid dimensions for X-Von Neumann topology
-        self.grid_size = int(math.sqrt(N))
-        if self.grid_size ** 2 != N:
-            raise ValueError("Population size must be a perfect square for X-Von Neumann topology")
 
         self.N = N  # 粒子数量
         self.D = D  # 每个粒子的维度
         self.M = M  # 最大迭代次数
         self.x = np.zeros((self.N, self.D))  # 粒子位置
         self.pbest = np.zeros((self.N, self.D))  # 粒子的历史最优位置
-        self.lbest = np.zeros((1, self.D))  # 全局最优位置
+        self.gbest = np.zeros((1, self.D))  # 全局最优位置
         self.p_fit = np.zeros(self.N)  # 粒子的适应度
         self.fit = 1e8  # 最优适应度
         self.lb = -5.0  # 下界
@@ -47,7 +43,7 @@ class BBExpPSO_model:
             self.p_fit[i] = aim
             if aim < self.fit:
                 self.fit = aim
-                self.lbest = self.x[i]
+                self.gbest = self.x[i]
 
     def x_von_neumann_topology(self):
         """
@@ -81,8 +77,8 @@ class BBExpPSO_model:
                         self.x[i][d] = self.pbest[i][d]
                     else:
                         neighbors = self.adjacency_matrix[i]  # 使用X-Von Neumann拓扑获取邻居
-                        mean = (self.pbest[i][d] + self.lbest[d]) / 2
-                        std = abs(self.pbest[i][d] - self.lbest[d])
+                        mean = (self.pbest[i][d] + self.gbest[d]) / 2
+                        std = abs(self.pbest[i][d] - self.gbest[d])
                         self.x[i][d] = np.random.normal(mean, std)
 
                 # 边界处理
@@ -92,7 +88,7 @@ class BBExpPSO_model:
                     self.p_fit[i] = aim
                     self.pbest[i] = self.x[i]
                     if self.p_fit[i] < self.fit:
-                        self.lbest = self.x[i]
+                        self.gbest = self.x[i]
                         self.fit = self.p_fit[i]
 
         return self.fit
@@ -112,7 +108,7 @@ class BBExpPSO_model:
         plt.contour(X, Y, Z, levels=20, cmap='viridis')
         plt.colorbar(label='Objective Function Value')
         plt.scatter(self.x[:, 0], self.x[:, 1], c='red', marker='o', label='Particles')
-        plt.scatter(self.lbest[0], self.lbest[1], c='yellow', marker='*', s=200, label='Global Best')
+        plt.scatter(self.gbest[0], self.gbest[1], c='yellow', marker='*', s=200, label='Global Best')
         plt.title('BBExp PSO Particle Distribution (Final Iteration)')
         plt.xlabel('x1')
         plt.ylabel('x2')
