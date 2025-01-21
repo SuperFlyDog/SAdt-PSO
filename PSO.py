@@ -47,24 +47,50 @@ class BBExpPSO_model:
 
     def x_von_neumann_topology(self):
         """
-        构建X-Von Neumann拓扑连接矩阵
+        构建X-Von Neumann拓扑连接矩阵，支持非完全平方数粒子数
         :return: X-Von Neumann拓扑连接矩阵
         """
-        adjacency_matrix = [[0 for _ in range(self.N)] for _ in range(self.N)]
-        # Todo X-Von Neumann拓扑连接矩阵如何编写？下面是错的，会导致全连接
-        for i in range(self.N):
-            for j in range(self.N):
-                # 添加Von Neumann连接 (上下左右)
-                if i > 0: adjacency_matrix[i-1][j] = 1  # 上
-                if i < self.N - 1: adjacency_matrix[i+1][j] = 1  # 下
-                if j > 0: adjacency_matrix[i][j-1] = 1  # 左
-                if j < self.N - 1: adjacency_matrix[i][j+1] = 1  # 右
+        side_length = int(np.ceil(np.sqrt(self.N)))  # 近似网格边长
+        adjacency_matrix = np.zeros((self.N, self.N))
 
-                # 添加对角线连接
-                if i > 0 and j > 0: adjacency_matrix[i-1][j-1] = 1  # 左上
-                if i > 0 and j < self.N - 1: adjacency_matrix[i-1][j+1] = 1  # 右上
-                if i < self.N - 1 and j > 0: adjacency_matrix[i+1][j-1] = 1  # 左下
-                if i < self.N - 1 and j < self.N - 1: adjacency_matrix[i+1][j+1] = 1  # 右下
+        for i in range(self.N):
+            row, col = divmod(i, side_length)  # 当前粒子的网格坐标
+            neighbors = []
+
+            # 上下左右邻居
+            if row > 0:  # 上
+                neighbors.append((row - 1) * side_length + col)
+            if row < side_length - 1:  # 下
+                down = (row + 1) * side_length + col
+                if down < self.N:  # 确保不越界
+                    neighbors.append(down)
+            if col > 0:  # 左
+                neighbors.append(row * side_length + (col - 1))
+            if col < side_length - 1:  # 右
+                right = row * side_length + (col + 1)
+                if right < self.N:  # 确保不越界
+                    neighbors.append(right)
+
+            # 对角线邻居
+            if row > 0 and col > 0:  # 左上
+                neighbors.append((row - 1) * side_length + (col - 1))
+            if row > 0 and col < side_length - 1:  # 右上
+                right_up = (row - 1) * side_length + (col + 1)
+                if right_up < self.N:  # 确保不越界
+                    neighbors.append(right_up)
+            if row < side_length - 1 and col > 0:  # 左下
+                left_down = (row + 1) * side_length + (col - 1)
+                if left_down < self.N:  # 确保不越界
+                    neighbors.append(left_down)
+            if row < side_length - 1 and col < side_length - 1:  # 右下
+                right_down = (row + 1) * side_length + (col + 1)
+                if right_down < self.N:  # 确保不越界
+                    neighbors.append(right_down)
+
+            # 更新邻接矩阵
+            for neighbor in neighbors:
+                adjacency_matrix[i][neighbor] = 1
+                adjacency_matrix[neighbor][i] = 1  # 保持对称性
 
         return adjacency_matrix
 
@@ -169,8 +195,8 @@ def perform_analysis(n_runs, N, D, M):
 
 if __name__ == '__main__':
     # Set parameters
-    N = 30  # population size
-    D = 2  # dimension
+    N = 10  # population size
+    D = 30  # dimension
     M = 200  # maximum iterations
     n_runs = 30  # number of runs for analysis
 
