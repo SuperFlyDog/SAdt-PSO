@@ -5,28 +5,32 @@ import time
 from statistics import mean, stdev
 
 matplotlib.use('TkAgg')
-import matplotlib.pyplot as plt
+
+
+# import matplotlib.pyplot as plt
 
 
 class BBExpPSO_model:
-    def __init__(self, N, D, M, lb, ub, initial_temperature, eta):
+    def __init__(self, N, D, M, lb, ub, initial_temperature, eta, duration):
+        # 初始化PSO模型
 
         self.N = N  # 粒子数量
         self.D = D  # 每个粒子的维度
         self.M = M  # 最大迭代次数
-        self.lb = lb  # 下界
-        self.ub = ub  # 上界
-        self.initial_temperature = initial_temperature  # 初始温度
-        self.eta = eta  # 阈值
+        self.lb = lb  # 搜索空间的下界
+        self.ub = ub  # 搜索空间的上界
+        self.initial_temperature = initial_temperature  # 模拟退火的初始温度
+        self.eta = eta  # 全局适应值变化率的阈值，用于判断是否陷入“僵局”
+        self.duration = duration  # 监测适应值变化的时长（滑动窗口大小）
 
-        self.x = np.zeros((self.N, self.D))  # 粒子位置
-        self.pbest = np.zeros((self.N, self.D))  # 粒子的历史最优位置
+        self.x = np.zeros((self.N, self.D))  # 粒子的位置矩阵
+        self.pbest = np.zeros((self.N, self.D))  # 粒子的历史最优位置矩阵
         self.gbest = np.zeros((1, self.D))  # 全局最优位置
-        self.p_fit = np.zeros(self.N)  # 粒子的适应度
-        self.fit = 1e8  # 最优适应度
-        self.theoretical_minimum = 0  # 目标函数的理论最小值
+        self.p_fit = np.zeros(self.N)  # 每个粒子的适应值
+        self.fit = 1e8  # 当前全局最优适应值
+        self.theoretical_minimum = 0  # 理论最优解
 
-        # 创建X-Von Neumann拓扑
+        # 创建X-Von Neumann拓扑结构
         self.adjacency_matrix = self.x_von_neumann_topology()
 
     def objective_function(self, x):
@@ -40,13 +44,13 @@ class BBExpPSO_model:
     def init_pop(self):
         """初始化粒子群"""
         for i in range(self.N):
-            self.x[i] = np.random.uniform(self.lb, self.ub, self.D)  # 初始化粒子位置
-            self.pbest[i] = self.x[i]  # 初始化个体最优位置
-            aim = self.objective_function(self.x[i])
+            self.x[i] = np.random.uniform(self.lb, self.ub, self.D)  # 随机生成粒子的位置
+            self.pbest[i] = self.x[i]  # 初始化每个粒子的个体最优位置为其初始位置
+            aim = self.objective_function(self.x[i])  # 计算粒子的适应值
             self.p_fit[i] = aim
-            if aim < self.fit:
+            if aim < self.fit:  # 如果当前粒子优于全局最优
                 self.fit = aim
-                self.gbest = self.x[i]
+                self.gbest = self.x[i]  # 更新全局最优位置
 
     def x_von_neumann_topology(self):
         """
@@ -99,9 +103,9 @@ class BBExpPSO_model:
 
     def metropolis_acceptance(self, delta_f, temperature):
         """模拟退火的 Metropolis 准则"""
-        if delta_f > 0:
+        if delta_f > 0:  # 如果适应值变好，直接接受
             return True
-        else:
+        else:  # 否则根据概率决定是否接受
             probability = np.exp(delta_f / temperature)
             return random.random() < probability
 
@@ -116,7 +120,7 @@ class BBExpPSO_model:
                 if i != j:
                     distances[i][j] = np.linalg.norm(self.x[i] - self.x[j])
 
-        # 找到彼此最近的两个粒子
+        # 找到彼此距离最近的两个粒子
         min_distance = np.inf
         min_pair = (0, 0)
         for i in range(self.N):
@@ -140,29 +144,33 @@ class BBExpPSO_model:
                     max_distance = dist_to_k
                     max_particle = k
 
-        # 将其中一个粒子连接到最远的粒子
+        # 将其中一个粒子单向连接到最远的粒子
         chosen_particle = random.choice([i, j])
-        new_adjacency_matrix[chosen_particle][max_particle] = 1
-        new_adjacency_matrix[max_particle][chosen_particle] = 1
+        new_adjacency_matrix[chosen_particle][max_particle] = 1  # 单向连接
 
         return new_adjacency_matrix
 
     def update(self):
         """粒子更新"""
-        delta_f_best = []
-        reconnected = False
+        delta_f_best_window = []  # 窗口存储Δf_best的值
 
         for t in range(self.M):
-            previous_best_fit = self.fit
+            previous_best_fit = self.fit  # 保存当前全局最优值
 
             for i in range(self.N):
                 for d in range(self.D):
-                    if random.random() < 0.5:
+                    if random.random() < 0.5:  # 按概率选择个体经验
                         self.x[i][d] = self.pbest[i][d]
-                    else:
-                        neighbors = self.adjacency_matrix[i]  # 使用拓扑获取邻居
-                        mean = (self.pbest[i][d] + self.gbest[d]) / 2
-                        std = abs(self.pbest[i][d] - self.gbest[d])
+                    else:  # 使用局部邻居的经验更新
+                        neighbors = np.where(self.adjacency_matrix[i] == 1)[0]  # 获取邻居索引
+                        if len(neighbors) > 0:
+                            local_best_idx = neighbors[np.argmin(self.p_fit[neighbors])]  # 找到局部最优粒子索引
+                            local_best = self.pbest[local_best_idx]  # 获取局部最优位置
+                            mean = (local_best[d] + self.pbest[i][d]) / 2
+                            std = abs(local_best[d] - self.pbest[i][d])
+                        else:  # 如果无邻居，使用全局经验
+                            mean = (self.pbest[i][d] + self.gbest[d]) / 2
+                            std = abs(self.pbest[i][d] - self.gbest[d])
                         self.x[i][d] = np.random.normal(mean, std)
 
                 # 边界处理
@@ -175,70 +183,77 @@ class BBExpPSO_model:
                         self.gbest = self.x[i]
                         self.fit = self.p_fit[i]
 
-            # 检查Δf_best是否小于阈值
+            # 更新适应值变化窗口
             delta_f = abs(self.fit - previous_best_fit)
-            delta_f_best.append(delta_f)
+            delta_f_best_window.append(delta_f)
+            if len(delta_f_best_window) > self.duration:
+                delta_f_best_window.pop(0)
 
-            # 计算当前温度
-            temperature = self.initial_temperature * (1 - t / self.M)
-            print('Temperature: ', temperature)
-            if not reconnected and delta_f < self.eta:
+            mean_delta_f_best = np.mean(delta_f_best_window)  # 计算窗口内的平均变化
+            temperature = self.initial_temperature * (1 - t / self.M)  # 更新温度
+
+            # 判断是否需要拓扑重连
+            if mean_delta_f_best < self.eta:
                 # 保存当前拓扑
                 old_adjacency_matrix = self.adjacency_matrix.copy()
 
                 # 进行拓扑重连
                 self.adjacency_matrix = self.update_topology()
-                reconnected = True
 
-                # 测试重连后的Δf_best
+                # 测试新拓扑的效果
                 temp_delta_f = []
-                for _ in range(10):  # 假设运行10次迭代
+                for _ in range(10):
                     for i in range(self.N):
                         for d in range(self.D):
                             if random.random() < 0.5:
                                 self.x[i][d] = self.pbest[i][d]
                             else:
-                                neighbors = self.adjacency_matrix[i]
-                                mean = (self.pbest[i][d] + self.gbest[d]) / 2
-                                std = abs(self.pbest[i][d] - self.gbest[d])
+                                neighbors = np.where(self.adjacency_matrix[i] == 1)[0]
+                                if len(neighbors) > 0:
+                                    local_best_idx = neighbors[np.argmin(self.p_fit[neighbors])]
+                                    local_best = self.pbest[local_best_idx]
+                                    mean = (local_best[d] + self.pbest[i][d]) / 2
+                                    std = abs(local_best[d] - self.pbest[i][d])
+                                else:
+                                    mean = (self.pbest[i][d] + self.gbest[d]) / 2
+                                    std = abs(self.pbest[i][d] - self.gbest[d])
                                 self.x[i][d] = np.random.normal(mean, std)
 
-                        # 边界处理
-                        self.x[i] = np.clip(self.x[i], self.lb, self.ub)
-                        aim = self.objective_function(self.x[i])
-                        if aim < self.p_fit[i]:
-                            self.p_fit[i] = aim
-                            self.pbest[i] = self.x[i]
-                            if self.p_fit[i] < self.fit:
-                                self.gbest = self.x[i]
-                                self.fit = self.p_fit[i]
+                            self.x[i] = np.clip(self.x[i], self.lb, self.ub)
+                            aim = self.objective_function(self.x[i])
+                            if aim < self.p_fit[i]:
+                                self.p_fit[i] = aim
+                                self.pbest[i] = self.x[i]
+                                if self.p_fit[i] < self.fit:
+                                    self.gbest = self.x[i]
+                                    self.fit = self.p_fit[i]
 
                     temp_delta_f.append(abs(self.fit - previous_best_fit))
-
-                # 判断是否接受新拓扑
-                mean_delta_f_new = np.mean(temp_delta_f)
-                if self.metropolis_acceptance(mean_delta_f_new - np.mean(delta_f_best), temperature):
-                    print("接受新拓扑")
+                # Todo 为什么每次都会接受新拓扑？ 可能原因1：参数设置不当。 可能原因2：代码有问题？
+                mean_temp_delta_f = np.mean(temp_delta_f)
+                if self.metropolis_acceptance(mean_temp_delta_f - mean_delta_f_best, temperature):
+                    print(f"Iteration {t}: New topology accepted.")
                 else:
-                    print("回滚到旧拓扑")
+                    print(f"Iteration {t}: Reverting to old topology.")
                     self.adjacency_matrix = old_adjacency_matrix
 
         return self.fit
 
 
-def perform_analysis(n_runs, N, D, M, lb, ub, initial_temperature, eta):
+def perform_analysis(n_runs, N, D, M, lb, ub, initial_temperature, eta, duration):
     """
-    Perform multiple runs of the BBExp PSO algorithm and analyze its performance.
+    执行多次PSO运行并分析其性能
 
     Args:
-        n_runs (int): Number of runs to perform
-        N (int): Population size
-        D (int): Dimension
-        M (int): Maximum iterations
-        lb (float): Lower bound of search space
-        ub (float): Upper bound of search space
-        initial_temperature (float): Initial temperature for simulated annealing
-        eta (float): Threshold for topology reconnection
+        n_runs (int): 运行次数
+        N (int): 粒子数量
+        D (int): 维度
+        M (int): 最大迭代次数
+        lb (float): 搜索空间下界
+        ub (float): 搜索空间上界
+        initial_temperature (float): 模拟退火初始温度
+        eta (float): 适应值变化率阈值
+        duration (int): 监测适应值变化的时长
     """
     empirical_errors = []
     execution_times = []
@@ -247,7 +262,7 @@ def perform_analysis(n_runs, N, D, M, lb, ub, initial_temperature, eta):
         start_time = time.time()
 
         # Run optimization
-        bbexp_pso = BBExpPSO_model(N, D, M, lb, ub, initial_temperature, eta)
+        bbexp_pso = BBExpPSO_model(N, D, M, lb, ub, initial_temperature, eta, duration)
         bbexp_pso.init_pop()
         gbest_value = bbexp_pso.update()
 
@@ -286,14 +301,14 @@ def perform_analysis(n_runs, N, D, M, lb, ub, initial_temperature, eta):
 
 
 if __name__ == '__main__':
-    # Set parameters
-    N = 30  # population size
-    D = 2  # dimension
-    M = 200  # maximum iterations
-    lb = -5.0  # lower bound of search space
-    ub = 5.0  # upper bound of search space
-    initial_temperature = 3.0  # initial temperature for simulated annealing
-    eta = 1e-5  # threshold for topology reconnection
-    n_runs = 1  # number of runs for analysis
+    N = 9  # 粒子数量
+    D = 20  # 维度
+    M = 1000  # 最大迭代次数
+    lb = -5.0  # 搜索空间下界
+    ub = 5.0  # 搜索空间上界
+    initial_temperature = 1.0  # 初始温度
+    eta = 0.0000001  # 全局最优解的适应值变化率（Δfbest）阈值
+    n_runs = 10  # 运行次数
+    duration = 10  # 监测适应值变化的时长
 
-    perform_analysis(n_runs, N, D, M, lb, ub, initial_temperature, eta)
+    perform_analysis(n_runs, N, D, M, lb, ub, initial_temperature, eta, duration)
