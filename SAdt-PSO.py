@@ -1,13 +1,77 @@
+import os
+
 import numpy as np
 import random
 import matplotlib
 import time
+import csv
+
 from statistics import mean, stdev
 
 matplotlib.use('TkAgg')
 
 
 # import matplotlib.pyplot as plt
+def log_results_to_csv(filename, test_name, test_expression, parameters, mean_error, mean_time, reliability):
+    """
+    将测试结果记录到 CSV 文件中。
+
+
+    """
+    # 如果文件不存在，则创建并写入表头
+    write_header = not os.path.exists(filename)
+
+    with open(filename, mode='a', newline='', encoding='utf-8') as file:
+        writer = csv.DictWriter(file, fieldnames=["Test Name", "Test Expression", "Parameters", "Mean Empirical Error",
+                                                  "Mean Execution Time", "Reliability"])
+        if write_header:
+            writer.writeheader()
+        writer.writerow({
+            "Test Name": test_name,
+            "Test Expression": test_expression,
+            "Parameters": str(parameters),
+            "Mean Empirical Error": str(mean_error),
+            "Mean Execution Time": str(mean_time),
+            "Reliability": str(reliability)
+        })
+
+
+def calculate_reliability(std_time, std_error, w1=0.5, w2=0.5):
+    """
+    计算算法的稳定性指标 Reliability。
+
+    Args:
+        std_time (float): 时间的标准差
+        std_error (float): 误差的标准差
+        w1 (float): 时间权重（默认为0.5）
+        w2 (float): 误差权重（默认为0.5）
+
+    Returns:
+        float: 算法稳定性指标 Reliability
+    """
+    # 避免标准差为 0 导致除以 0 的情况
+    reliability_time = 1 / std_time if std_time > 0 else float('inf')
+    reliability_error = 1 / std_error if std_error > 0 else float('inf')
+
+    # 计算加权指标
+    reliability = w1 * reliability_time + w2 * reliability_error
+    return reliability
+
+
+def objective_function(x):
+    """目标函数: Sphere函数"""
+    # Sphere函数的定义：f(x) = sum(x_i^2)
+    return np.sum(x ** 2)
+
+
+def metropolis_acceptance(delta_f, temperature):
+    # print(temperature)
+    """模拟退火的 Metropolis 准则"""
+    if delta_f > 0:  # 如果适应值变好，直接接受
+        return True
+    else:  # 否则根据概率决定是否接受
+        probability = np.exp(delta_f / temperature)
+        return random.random() < probability
 
 
 class BBExpPSO_model:
@@ -33,20 +97,12 @@ class BBExpPSO_model:
         # 创建X-Von Neumann拓扑结构
         self.adjacency_matrix = self.x_von_neumann_topology()
 
-    def objective_function(self, x):
-        """目标函数: Rastrigin函数"""
-        A = 10
-        x1 = x[0]
-        x2 = x[1]
-        Z = 2 * A + x1 ** 2 - A * np.cos(2 * np.pi * x1) + x2 ** 2 - A * np.cos(2 * np.pi * x2)
-        return Z
-
     def init_pop(self):
         """初始化粒子群"""
         for i in range(self.N):
             self.x[i] = np.random.uniform(self.lb, self.ub, self.D)  # 随机生成粒子的位置
             self.pbest[i] = self.x[i]  # 初始化每个粒子的个体最优位置为其初始位置
-            aim = self.objective_function(self.x[i])  # 计算粒子的适应值
+            aim = objective_function(self.x[i])  # 计算粒子的适应值
             self.p_fit[i] = aim
             if aim < self.fit:  # 如果当前粒子优于全局最优
                 self.fit = aim
@@ -101,14 +157,6 @@ class BBExpPSO_model:
 
         return adjacency_matrix
 
-    def metropolis_acceptance(self, delta_f, temperature):
-        """模拟退火的 Metropolis 准则"""
-        if delta_f > 0:  # 如果适应值变好，直接接受
-            return True
-        else:  # 否则根据概率决定是否接受
-            probability = np.exp(delta_f / temperature)
-            return random.random() < probability
-
     def update_topology(self):
         """根据逻辑重连拓扑"""
         new_adjacency_matrix = self.adjacency_matrix.copy()
@@ -156,6 +204,7 @@ class BBExpPSO_model:
 
         for t in range(self.M):
             previous_best_fit = self.fit  # 保存当前全局最优值
+            print(t)
 
             for i in range(self.N):
                 for d in range(self.D):
@@ -175,7 +224,7 @@ class BBExpPSO_model:
 
                 # 边界处理
                 self.x[i] = np.clip(self.x[i], self.lb, self.ub)
-                aim = self.objective_function(self.x[i])
+                aim = objective_function(self.x[i])
                 if aim < self.p_fit[i]:
                     self.p_fit[i] = aim
                     self.pbest[i] = self.x[i]
@@ -220,7 +269,7 @@ class BBExpPSO_model:
                                 self.x[i][d] = np.random.normal(mean, std)
 
                             self.x[i] = np.clip(self.x[i], self.lb, self.ub)
-                            aim = self.objective_function(self.x[i])
+                            aim = objective_function(self.x[i])
                             if aim < self.p_fit[i]:
                                 self.p_fit[i] = aim
                                 self.pbest[i] = self.x[i]
@@ -230,9 +279,11 @@ class BBExpPSO_model:
 
                     temp_delta_f.append(abs(self.fit - previous_best_fit))
                 # Todo 为什么每次都会接受新拓扑？ 可能原因1：参数设置不当。 可能原因2：代码有问题？
-                mean_temp_delta_f = np.mean(temp_delta_f)
-                if self.metropolis_acceptance(mean_temp_delta_f - mean_delta_f_best, temperature):
-                    print(f"Iteration {t}: New topology accepted.")
+                # Todo 原因：metropolis_acceptance->mean_temp_delta_f - mean_delta_f_best过于小
+                mean_temp_delta_f = np.mean(temp_delta_f)  # 拓扑重连后进行测试迭代时，适应值变化率的平均值。
+                if metropolis_acceptance(mean_temp_delta_f - mean_delta_f_best, temperature):
+                    # print(f"Iteration {t}: New topology accepted.")
+                    nothing = 1
                 else:
                     print(f"Iteration {t}: Reverting to old topology.")
                     self.adjacency_matrix = old_adjacency_matrix
@@ -274,9 +325,9 @@ def perform_analysis(n_runs, N, D, M, lb, ub, initial_temperature, eta, duration
         execution_time = time.time() - start_time
         execution_times.append(execution_time)
 
-        print(f"Run {i + 1}/{n_runs}:")
-        print(f"Empirical Error: {empirical_error:.6f}")
-        print(f"Execution Time: {execution_time:.3f} seconds\n")
+        # print(f"Run {i + 1}/{n_runs}:")
+        # print(f"Empirical Error: {empirical_error:.6f}")
+        # print(f"Execution Time: {execution_time:.3f} seconds\n")
 
     # Calculate statistics
     mean_error = mean(empirical_errors)
@@ -289,6 +340,9 @@ def perform_analysis(n_runs, N, D, M, lb, ub, initial_temperature, eta, duration
     else:
         std_error = 0.0
         std_time = 0.0
+    # 计算 Reliability
+    reliability = calculate_reliability(std_time, std_error, w1=0.5, w2=0.5)  # 权重可调整
+    # print(f"Reliability: {reliability:.4f}")
 
     # Print analysis results
     print("\nPerformance Analysis Results:")
@@ -298,16 +352,31 @@ def perform_analysis(n_runs, N, D, M, lb, ub, initial_temperature, eta, duration
     print(f"Standard Deviation of Error: {std_error:.6f}")
     print(f"Mean Execution Time: {mean_time:.3f} seconds")
     print(f"Standard Deviation of Time: {std_time:.3f} seconds")
+    # 测试结果
+    test_name = "Sphere Function Test"
+    test_expression = "f(x) = sum(x_i^2)"
+    parameters = {
+        "N": N,
+        "D": D,
+        "M": M,
+        "lb": lb,
+        "ub": ub,
+        "initial_temperature": initial_temperature,
+        "eta": eta,
+        "duration": duration
+    }
+    # 记录到 CSV 文件
+    log_results_to_csv("test_results.csv", test_name, test_expression, parameters, mean_error, mean_time, reliability)
 
 
 if __name__ == '__main__':
-    N = 9  # 粒子数量
-    D = 20  # 维度
+    N = 30  # 粒子数量
+    D = 30  # 维度
     M = 1000  # 最大迭代次数
-    lb = -5.0  # 搜索空间下界
-    ub = 5.0  # 搜索空间上界
-    initial_temperature = 1.0  # 初始温度
-    eta = 0.0000001  # 全局最优解的适应值变化率（Δfbest）阈值
+    lb = -100.0  # 搜索空间下界
+    ub = 100.0  # 搜索空间上界
+    initial_temperature = 0.00001  # 初始温度
+    eta = 0.0001  # 全局最优解的适应值变化率（Δfbest）阈值
     n_runs = 10  # 运行次数
     duration = 10  # 监测适应值变化的时长
 
